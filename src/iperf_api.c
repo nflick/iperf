@@ -618,6 +618,7 @@ iperf_parse_arguments(struct iperf_test *test, int argc, char **argv)
         {"client", required_argument, NULL, 'c'},
         {"udp", no_argument, NULL, 'u'},
         {"bandwidth", required_argument, NULL, 'b'},
+        {"linear", no_argument, NULL, 'r'},
         {"time", required_argument, NULL, 't'},
         {"bytes", required_argument, NULL, 'n'},
         {"blockcount", required_argument, NULL, 'k'},
@@ -671,7 +672,7 @@ iperf_parse_arguments(struct iperf_test *test, int argc, char **argv)
 
     blksize = 0;
     server_flag = client_flag = rate_flag = duration_flag = 0;
-    while ((flag = getopt_long(argc, argv, "p:f:i:D1VJvsc:ub:t:n:k:l:P:Rw:B:M:N46S:L:ZO:F:A:T:C:dI:hX:", longopts, NULL)) != -1) {
+    while ((flag = getopt_long(argc, argv, "p:f:i:D1VJvsc:ub:rt:n:k:l:P:Rw:B:M:N46S:L:ZO:F:A:T:C:dI:hX:", longopts, NULL)) != -1) {
         switch (flag) {
             case 'p':
                 test->server_port = atoi(optarg);
@@ -758,6 +759,9 @@ iperf_parse_arguments(struct iperf_test *test, int argc, char **argv)
                 test->settings->rate = unit_atof_rate(optarg);
 		rate_flag = 1;
 		client_flag = 1;
+                break;
+            case 'r':
+                test->settings->linear = 1;
                 break;
             case 't':
                 test->duration = atoi(optarg);
@@ -1031,12 +1035,17 @@ iperf_check_throttle(struct iperf_stream *sp, struct timeval *nowP)
 {
     double seconds;
     uint64_t bits_per_second;
+    uint64_t linear_target;
 
     if (sp->test->done)
         return;
     seconds = timeval_diff(&sp->result->start_time, nowP);
     bits_per_second = sp->result->bytes_sent * 8 / seconds;
-    if (bits_per_second < sp->test->settings->rate) {
+    linear_target = (uint64_t)((sp->test->settings->rate * seconds * seconds) / (sp->test->duration * 2));
+    if (sp->test->settings->linear && sp->result->bytes_sent * 8 < linear_target) {
+        sp->green_light = 1;
+        FD_SET(sp->socket, &sp->test->write_set);
+    } else if (!sp->test->settings->linear && bits_per_second < sp->test->settings->rate) {
         sp->green_light = 1;
         FD_SET(sp->socket, &sp->test->write_set);
     } else {
